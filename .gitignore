@@ -1,0 +1,5 @@
+.cabal-sandbox
+dist
+*.beam
+erjang-master
+cabal.sandbox.config

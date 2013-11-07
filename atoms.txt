@@ -1,0 +1,17 @@
+exit
+EXIT
+throw
+error
+nocatch
+badmatch
+case_clause
+try_clause
+badfun
+badarity
+undef
+erlang
+now
+get_stacktrace
+sign_plus +
+sign_minus -
+sign_mult *
