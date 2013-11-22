@@ -5,7 +5,7 @@ import           Control.Applicative
 import           Data.List             as List
 import           Data.Maybe            as Maybe
 
-import           Language.Haskell.Exts
+import           Language.Haskell.Exts hiding (name, sym)
 
 
 main :: IO ()
@@ -72,7 +72,6 @@ impDecl =
      , importSpecs = Just ( False , [ IThingAll (Ident "AtomNo") ] )
      }
   ]
-
 
 am_functions :: [String] -> [Decl]
 am_functions names = concatMap (\(name, ix) -> am_function name ix) (zip names [0..])

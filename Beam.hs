@@ -388,8 +388,8 @@ readCodeInteger = do
 codeInt4_tag :: Word8
 codeInt4_tag = 0
 
-codeInt12_tag :: Word8
-codeInt12_tag = 8
+_codeInt12_tag :: Word8
+_codeInt12_tag = 8
 
 readSmallIntValue :: Word8 -> Get Int32
 readSmallIntValue w0 = do
