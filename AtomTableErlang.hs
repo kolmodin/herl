@@ -3,7 +3,7 @@ module AtomTableErlang
        (basic, am_exit, am_EXIT, am_throw, am_error, am_nocatch,
         am_badmatch, am_case_clause, am_try_clause, am_badfun, am_badarity,
         am_undef, am_erlang, am_now, am_get_stacktrace, am_sign_plus,
-        am_sign_minus, am_sign_mult)
+        am_sign_minus, am_sign_mult, am_spawn)
        where
 import AtomTable
 import ETerm (AtomNo(..))
@@ -13,7 +13,7 @@ basic
   = fromList
       ["exit", "EXIT", "throw", "error", "nocatch", "badmatch",
        "case_clause", "try_clause", "badfun", "badarity", "undef",
-       "erlang", "now", "get_stacktrace", "+", "-", "*"]
+       "erlang", "now", "get_stacktrace", "+", "-", "*", "spawn"]
  
 am_exit :: AtomNo
 am_exit = AtomNo 0
@@ -65,3 +65,6 @@ am_sign_minus = AtomNo 15
  
 am_sign_mult :: AtomNo
 am_sign_mult = AtomNo 16
+ 
+am_spawn :: AtomNo
+am_spawn = AtomNo 17
