@@ -31,3 +31,28 @@ data ETerm
 
 isEtermEq :: ETerm -> ETerm -> Bool
 isEtermEq = (==)
+
+isList :: ETerm -> Bool
+isList (EList _ _) = True
+isList ENil = True
+isList _ = False
+
+toErlangList :: [ETerm] -> ETerm
+toErlangList [] = ENil
+toErlangList (x:xs) = EList x (toErlangList xs)
+
+fromErlangList :: ETerm -> [ETerm]
+fromErlangList (EList hd tl) = hd : fromErlangList tl
+fromErlangList ENil = []
+
+isAtom :: ETerm -> Bool
+isAtom (EAtom _) = True
+isAtom _ = False
+
+isNonValue :: ETerm -> Bool
+isNonValue ENonValue = True
+isNonValue _ = False
+
+isFunction :: ETerm -> Bool
+isFunction (EFun {}) = True
+isFunction _ = False

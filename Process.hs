@@ -241,10 +241,6 @@ stackTrace = do
     return $ ETuple [EAtom emod, EAtom fun, EInteger (fromIntegral ar)]
   return (toErlangList lst)
 
-toErlangList :: [ETerm] -> ETerm
-toErlangList [] = ENil
-toErlangList (x:xs) = EList x (toErlangList xs)
-
 ipToFunction :: Code -> Int -> Maybe (AtomNo, AtomNo, Int32)
 ipToFunction _ (-1) = Nothing
 ipToFunction code n =
@@ -277,19 +273,6 @@ renderETerm at eterm = go at eterm
     fromList :: ETerm -> ETerm -> [ETerm]
     fromList hd ENil = [hd]
     fromList hd (EList hd' tl) = hd : fromList hd' tl
-
-
-isAtom :: ETerm -> Bool
-isAtom (EAtom _) = True
-isAtom _ = False
-
-isNonValue :: ETerm -> Bool
-isNonValue ENonValue = True
-isNonValue _ = False
-
-isFunction :: ETerm -> Bool
-isFunction (EFun {}) = True
-isFunction _ = False
 
 continue :: PM (Maybe a)
 continue = modify (\p -> p { pIp = pIp p + 1 }) >> return Nothing
