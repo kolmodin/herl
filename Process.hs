@@ -114,6 +114,15 @@ showFA at f0 a0 = showByteString f . showString "/" . shows a
 
 type PM a = StateT Process IO a
 
+getProcess :: PM Process
+getProcess = get
+
+getsProcess :: (Process -> a) -> PM a
+getsProcess f = gets f
+
+modifyProcess :: (Process -> Process) -> PM ()
+modifyProcess f = modify f
+
 runBif :: AtomNo -> AtomNo -> Arity -> PM ()
 runBif emod fun arity =
   case lookup (emod, fun, arity) bifs of
@@ -179,26 +188,26 @@ data ErrorKind
 fault :: ETerm -> ErrorType -> PM (Maybe a)
 fault errorTerm0 kind0 = do
   st <- stackTrace
-  catches <- gets pCatches
+  catches <- getsProcess pCatches
   let (errorTerm', kind) = case (catches, kind0) of
         ([], ExcThrown) -> (ETuple [(EAtom AT.am_nocatch), errorTerm0], ExcError BasicError)
         _ -> (errorTerm0, kind0)
       errorTerm = expandErrorTerm errorTerm' kind
   case catches of
     [] -> do
-      at <- gets pAtomTable
+      at <- getsProcess pAtomTable
       liftIO $ putStrLn (renderETerm at errorTerm)
       liftIO $ print kind
       error "fault: should kill process"
     (c:_cs) -> do
-      modify (\p -> p { pStack = reverse . take (catchCallStackLength c) . reverse $ pStack p
-                      , pYreg =  reverse . take (catchActiveYRegs     c) . reverse $ pYreg p })
+      modifyProcess (\p -> p { pStack = reverse . take (catchCallStackLength c) . reverse $ pStack p
+                             , pYreg =  reverse . take (catchActiveYRegs     c) . reverse $ pYreg p })
       let st' = ETuple [errorTerm, st]
       writeDestination (Destination (OperandXReg 0)) ENonValue
       writeDestination (Destination (OperandXReg 1)) (EAtom (exceptionAtom kind))
       writeDestination (Destination (OperandXReg 2)) errorTerm
       writeDestination (Destination (OperandXReg 3)) st' --approx...
-      modify (\p -> p { pStackTrace = Just st' })
+      modifyProcess (\p -> p { pStackTrace = Just st' })
       gotoModIp (catchModule c) (catchIp c)
       return Nothing
 
@@ -222,7 +231,7 @@ exceptionAtom ExcThrown = AT.am_throw
 
 erlangGetStacktrace0 :: PM ()
 erlangGetStacktrace0 = do
-  st <- gets pStackTrace
+  st <- getsProcess pStackTrace
   let term = case st of
                Nothing -> ENil
                Just st' -> st'
@@ -232,8 +241,8 @@ erlangGetStacktrace0 = do
 
 stackTrace :: PM ETerm
 stackTrace = do
-  stack <- gets pStack
-  allModules <- gets pAllModules
+  stack <- getsProcess pStack
+  allModules <- getsProcess pAllModules
   lst <- forM stack $ \(StackFrame modName ip) -> do
     let Just emod = lookup modName allModules
     let code = emodCode emod
@@ -275,15 +284,15 @@ renderETerm at eterm = go at eterm
     fromList hd (EList hd' tl) = hd : fromList hd' tl
 
 continue :: PM (Maybe a)
-continue = modify (\p -> p { pIp = pIp p + 1 }) >> return Nothing
+continue = modifyProcess (\p -> p { pIp = pIp p + 1 }) >> return Nothing
 
 gotoModIp :: AtomNo -> Int -> PM ()
 gotoModIp modName ip = do
-  p <- get
+  p <- getProcess
   emod <- case lookup modName (pAllModules p) of
             Just emod -> return emod
             Nothing -> error $ "no such module; " ++ show modName
-  modify (\p -> p { pEModule = emod, pIp = ip })
+  modifyProcess (\p -> p { pEModule = emod, pIp = ip })
 
 gotoModFunArity :: AtomNo -> AtomNo -> Arity -> PM ()
 gotoModFunArity mod fun ar = do
@@ -294,12 +303,12 @@ gotoModFunArity mod fun ar = do
       case lookup (mod, fun, ar) bifs of
         Just func -> func
         Nothing -> do -- TODO: module:fun/ar not found! create erlang error.
-          at <- gets pAtomTable
+          at <- getsProcess pAtomTable
           error $ showString "function " . showMFA at mod fun ar . showString " not found" $ []
 
 lookupModFunArity :: AtomNo -> AtomNo -> Arity -> PM (Maybe (EModule, Int))
 lookupModFunArity modName funName funArity = do
-  p <- get
+  p <- getProcess
   case [ (emod, ip)
        | emod <- maybeToList (lookup modName (pAllModules p))
        , (fun', arity, label) <- emodExports emod
@@ -312,11 +321,11 @@ lookupModFunArity modName funName funArity = do
 readSource :: Source -> PM ETerm
 readSource (Source (OperandInt no)) = return $ EInteger (fromIntegral no)
 readSource (Source (OperandXReg n)) =
-  gets $ \p -> pXreg p !! (fromIntegral n)
+  getsProcess $ \p -> pXreg p !! (fromIntegral n)
 readSource (Source (OperandYReg n)) =
-  gets $ \p -> pYreg p !! (fromIntegral n)
+  getsProcess $ \p -> pYreg p !! (fromIntegral n)
 readSource (Source (OperandTableLiteral no)) = do
-  p <- get
+  p <- getProcess
   let Literal x = emodLiteralTable (pEModule p) !! (fromIntegral no)
   return $ extTermToETerm x
 readSource (Source (OperandAtom atomNo)) = return $! EAtom atomNo
@@ -326,8 +335,8 @@ readSource (Source src) = error $ "readSource " ++ show src
 writeDestination :: Destination -> ETerm -> PM ()
 writeDestination dest !value =
   case dest of
-    (Destination (OperandXReg n)) -> modify (\p -> p { pXreg = updateList (pXreg p) (fromIntegral n) })
-    (Destination (OperandYReg n)) -> modify (\p -> p { pYreg = updateList (pYreg p) (fromIntegral n) })
+    (Destination (OperandXReg n)) -> modifyProcess (\p -> p { pXreg = updateList (pXreg p) (fromIntegral n) })
+    (Destination (OperandYReg n)) -> modifyProcess (\p -> p { pYreg = updateList (pYreg p) (fromIntegral n) })
     _ -> error ("writeDest " ++ show dest ++ ", value=" ++ show value)
   where
     updateList list pos =
@@ -339,9 +348,9 @@ writeDestination dest !value =
 
 popCatch :: PM CatchContext
 popCatch = do
-  ccs <- gets pCatches
+  ccs <- getsProcess pCatches
   case ccs of
-    (c:cs) -> modify (\p -> p { pCatches = cs }) >> return c
+    (c:cs) -> modifyProcess (\p -> p { pCatches = cs }) >> return c
     [] -> error "popCatch: no catchcontexts to pop"
 
 addStackTrace :: ETerm -> ETerm -> PM ETerm
@@ -354,13 +363,13 @@ buildStackTrace exc = return exc
 
 step :: PM (Maybe ETerm)
 step = do
-  p <- get
+  p <- getProcess
   let op = opAtIp (emodCode (pEModule p)) (pIp p)
   handleOp op
 
 handleOp :: Op -> PM (Maybe ETerm)
 handleOp op0 = do
-  p <- get
+  p <- getProcess
   let thisModuleName = emodModNameAtom (pEModule p)
       sameModule ip = StackFrame thisModuleName ip
   case op0 of
@@ -413,10 +422,10 @@ handleOp op0 = do
       gotoModFunArity modName funName funArity
       ret
     AllocateZero noYregs _ -> do
-      modify (\p -> p { pYreg = replicate (fromIntegral noYregs) (EInteger 0) ++ (pYreg p) })
+      modifyProcess (\p -> p { pYreg = replicate (fromIntegral noYregs) (EInteger 0) ++ (pYreg p) })
       continue
     Allocate noYregs _ -> do
-      modify (\p -> p { pYreg = replicate (fromIntegral noYregs) ENil ++ (pYreg p) })
+      modifyProcess (\p -> p { pYreg = replicate (fromIntegral noYregs) ENil ++ (pYreg p) })
       continue
     IsLt label src1 src2 -> do
       EInteger value1 <- readSource src1
@@ -510,7 +519,7 @@ handleOp op0 = do
                        | otherwise -> p { pEModule = fromJust (lookup newMod (pAllModules p))
                                         , pStack = newStack
                                         , pIp = ip }
-          put p'
+          modifyProcess (const p')
           ret
     Catch (YReg dest) catchLbl -> do
       returnIp <- lookupIp catchLbl
@@ -536,7 +545,7 @@ handleOp op0 = do
           then writeDestination (Destination (OperandXReg 0)) =<< readSource (Source (OperandXReg 2))
           else do
             when (x1 == EAtom AT.am_error) $ do
-              Just st <- gets pStackTrace
+              Just st <- getsProcess pStackTrace
               writeDestination (Destination (OperandXReg 2)) st
             x2 <- readSource (Source (OperandXReg 2))
             writeDestination (Destination (OperandXReg 0))
@@ -563,11 +572,11 @@ handleOp op0 = do
 
     _ -> error (show op0)
   where
-    getOp = gets $ \p -> opAtIp (emodCode (pEModule p)) (pIp p)
-    deallocateY n = modify (\p -> p { pYreg = drop (fromIntegral n) (pYreg p) })
-    updateStack f = modify (\p -> p { pStack = f (pStack p)})
-    updateCatches f = modify (\p -> p { pCatches = f (pCatches p) })
-    setXRegs x_regs = modify (\p -> p { pXreg = x_regs})
+    getOp = getsProcess $ \p -> opAtIp (emodCode (pEModule p)) (pIp p)
+    deallocateY n = modifyProcess (\p -> p { pYreg = drop (fromIntegral n) (pYreg p) })
+    updateStack f = modifyProcess (\p -> p { pStack = f (pStack p)})
+    updateCatches f = modifyProcess (\p -> p { pCatches = f (pCatches p) })
+    setXRegs x_regs = modifyProcess (\p -> p { pXreg = x_regs})
     bif_binop f op1 op2 dest = do
       value1 <- readSource op1
       value2 <- readSource op2
@@ -579,10 +588,10 @@ handleOp op0 = do
     bif_mult (EInteger x) (EInteger y) = EInteger (x*y)
     bif_mult x y = error (show x ++ " * " ++ show y)
     lookupIp (OperandLabl label) = do
-      p <- get
+      p <- getProcess
       case lookup label (emodLabelToIp (pEModule p)) of
         Nothing -> error $ "tried to lookup label that does not exist: " ++ show label
         Just ip -> return ip
     gotoLabel label = gotoIp =<< lookupIp label
-    gotoIp ip = modify (\p -> p { pIp = ip })
+    gotoIp ip = modifyProcess (\p -> p { pIp = ip })
     ret = return Nothing
