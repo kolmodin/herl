@@ -7,41 +7,44 @@ module Process where
 
 
 -- hp
+import           Control.Concurrent
+import           Control.Concurrent.MVar
 import           Control.Monad.State.Strict
-import qualified Data.ByteString             as B
-import qualified Data.Char                   as Char
+import qualified Data.ByteString            as B
+import qualified Data.Char                  as Char
 import           Data.Int
-import           Data.List                   (intersperse)
-import           Data.Maybe                  (fromJust, listToMaybe,
-                                              maybeToList)
-import           Text.Show                   (showListWith)
+import           Data.List                  (intersperse)
+import           Data.Maybe                 (fromJust, listToMaybe, maybeToList)
+import           Text.Show                  (showListWith)
 
 -- 3rd party
-import qualified Data.Vector                 as V
+import qualified Data.Vector                as V
 import           Text.Show.Pretty
 
 -- this project
-import           AtomTable                   (AtomTable)
-import qualified AtomTable                   as AT
-import qualified AtomTableErlang             as AT
+import           AtomTable                  (AtomTable)
+import qualified AtomTable                  as AT
+import qualified AtomTableErlang            as AT
 import           Beam
 import           EModule
+-- import           ErlangContext
 import           ETerm
 import           ExtTerm
 
 data Process =
   Process
-    { pXreg       :: ![ETerm]
-    , pYreg       :: ![ETerm]
-    , pIp         :: !Int
-    , pEModule    :: !EModule
-    , pStack      :: ![StackFrame]
-    , pCatches    :: ![CatchContext]
-    , pAtomTable  :: AtomTable
-    , pFault      :: Maybe AtomNo
-    , pStackTrace :: Maybe ETerm
-    , pAllModules :: [(AtomNo, EModule)]
-    } deriving Show
+    { pXreg              :: ![ETerm]
+    , pYreg              :: ![ETerm]
+    , pIp                :: !Int
+    , pEModule           :: !EModule
+    , pStack             :: ![StackFrame]
+    , pCatches           :: ![CatchContext]
+    , pAtomTable         :: AtomTable
+    , pFault             :: Maybe AtomNo
+    , pStackTrace        :: Maybe ETerm
+    , pIncommingMessages :: MVar [ETerm]
+    , pAllModules        :: [(AtomNo, EModule)]
+    }
 
 data StackFrame
   = StackFrame {-# UNPACK #-} !AtomNo {-# UNPACK #-} !Int
@@ -55,21 +58,49 @@ data CatchContext =
     , catchActiveYRegs     :: {-# UNPACK #-} !Int
     } deriving Show
 
-runBeam :: [String] -> B.ByteString -> [ETerm] -> IO ()
-runBeam files fun args = do
+runBeam :: [String] -> B.ByteString -> B.ByteString -> [ETerm] -> IO ()
+runBeam files mod fun args = do
   beams <- mapM readBeamFile files
   let (at, emods) = foldr (\beam (at,emods) -> let (emod, at', beam') = beamToModule beam at in (at', emod:emods)) (AT.basic,[]) beams
       funNameAtom = AT.lookupByName at fun
-      p0 = makeProcess emods at funNameAtom args
-      stepper = do
-        p <- get
-        liftIO $ putStrLn $ "X: " ++ showListWith showString (map (renderETerm at) (pXreg p)) []
-        liftIO $ putStrLn $ "Y: " ++ showListWith showString (map (renderETerm at) (pYreg p)) []
-        liftIO $ putStrLn $ "Catches: " ++ ppShow (pCatches p)
-        liftIO $ putStrLn $ "Stack: " ++ ppShow (pStack p)
-        liftIO $ putStrLn ""
-        liftIO $ putStrLn $ show (pIp p) ++ ": " ++ show (opAtIp (emodCode (pEModule p)) (pIp p))
-        liftIO $ putStrLn ""
+      modNameAtom = AT.lookupByName at mod
+  p0 <- makeProcess emods at modNameAtom funNameAtom args
+  ctx <- newMVar (EC [(emodModNameAtom e, e) | e <- emods] at [p0])
+  runProcess ctx p0
+
+makeProcess :: [EModule] -> AtomTable -> AtomNo -> AtomNo -> [ETerm] -> IO Process
+makeProcess emods at emodAN funAtomName args = do
+  --print $ (map emodName emods, "makeProcess", emodAN, funAtomName, args)
+  let argsArity = fromIntegral (length args)
+      (emod, ip) = case [ (emod', ip) | emod' <- emods
+                                      , emodModNameAtom emod' == emodAN
+                                      , (fun', Arity arity, label) <- emodExports emod'
+                                      , fun' == funAtomName
+                                      , arity == argsArity
+                                      , ip <- maybeToList (lookup label (emodLabelToIp emod')) ] of
+                     [res] -> res
+                     _ -> error $ showString "no such label: " . showFA at funAtomName (Arity argsArity) $ []
+  incomming <- newMVar []
+  return $ Process args [] ip emod [] [] at Nothing Nothing incomming [ (emodModNameAtom emod, emod) | emod <- emods ]
+
+runProcess :: MVar ErlangContext -> Process -> IO ()
+runProcess ctx p0 = do
+  --putStrLn $ ppShow $ pAtomTable p0
+  (steps, (_ctx, p)) <- runStateT stepper (ctx, p0)
+  let val = head $ [ v | Left v <- steps ]
+  let rendered = renderETerm (pAtomTable p) val
+  liftIO $ putStrLn rendered
+  where
+    stepper = do
+        p <- getProcess
+        let at = pAtomTable p
+        --liftIO $ putStrLn $ "X: " ++ showListWith showString (map (renderETerm at) (pXreg p)) []
+        --liftIO $ putStrLn $ "Y: " ++ showListWith showString (map (renderETerm at) (pYreg p)) []
+        --liftIO $ putStrLn $ "Catches: " ++ ppShow (pCatches p)
+        --liftIO $ putStrLn $ "Stack: " ++ ppShow (pStack p)
+        --liftIO $ putStrLn ""
+        --liftIO $ putStrLn $ show (pIp p) ++ ": " ++ show (opAtIp (emodCode (pEModule p)) (pIp p))
+        --liftIO $ putStrLn ""
         r <- step
         case r of
           Nothing -> do
@@ -77,24 +108,6 @@ runBeam files fun args = do
             return (Right (opAtIp (emodCode (pEModule p)) (pIp p), p) : ps)
           Just v -> do
             return [Right (opAtIp (emodCode (pEModule p)) (pIp p), p), Left v]
-  putStrLn $ ppShow $ pAtomTable p0
-  (steps, _p') <- runStateT stepper p0
-  let val = head $ [ v | Left v <- steps ]
-  --putStrLn $ ppShow $ beam'
-  let rendered = renderETerm at val
-  liftIO $ putStrLn rendered
-
-makeProcess :: [EModule] -> AtomTable -> AtomNo -> [ETerm] -> Process
-makeProcess emods at fun args =
-  let argsArity = fromIntegral (length args)
-      (emod, ip) = case [ (emod, ip) | emod <- emods
-                                     , (fun', Arity arity, label) <- emodExports emod
-                                     , fun' == fun
-                                     , arity == argsArity
-                                     , ip <- maybeToList (lookup label (emodLabelToIp emod)) ] of
-                     [res] -> res
-                     _ -> error $ showString "no such label: " . showFA at fun (Arity argsArity) $ []
-  in Process args [] ip emod [] [] at Nothing Nothing [ (emodModNameAtom emod, emod) | emod <- emods ]
 
 showByteString :: B.ByteString -> ShowS
 showByteString bs = showString (map (Char.chr . fromIntegral) (B.unpack bs))
@@ -112,16 +125,39 @@ showFA at f0 a0 = showByteString f . showString "/" . shows a
     f = AT.lookupByCode at f0
     a = unArity a0
 
-type PM a = StateT Process IO a
+type PM a = StateT (MVar ErlangContext, Process) IO a
+
+data ErlangContext = EC {
+    ctx_mods              :: [(AtomNo, EModule)],
+    ctx_atomtable         :: AT.AtomTable,
+    ctx_runningProcessess :: [Process]
+  }
+
+spawn3 :: MVar ErlangContext -> AtomNo -> AtomNo -> ETerm -> IO ()
+spawn3 ec_mvar emod_atom fun_atom args = modifyMVar_ ec_mvar $ \ec -> do
+  (emod, at, emods) <- case lookup emod_atom (ctx_mods ec) of
+    Just emod -> return (emod, ctx_atomtable ec, ctx_mods ec)
+    Nothing -> do
+      beam <- readBeamFile "oh-noes-.beam"
+      let (emod, at, beam') = beamToModule beam (ctx_atomtable ec)
+      return (emod, at, (emod_atom, emod) : ctx_mods ec)
+  proc <- makeProcess (map snd emods) at emod_atom fun_atom (fromErlangList args)
+  forkIO (runProcess ec_mvar proc)
+  return ec { ctx_runningProcessess = proc : ctx_runningProcessess ec
+            , ctx_mods = emods
+            , ctx_atomtable = at }
 
 getProcess :: PM Process
-getProcess = get
+getProcess = gets snd
 
 getsProcess :: (Process -> a) -> PM a
-getsProcess f = gets f
+getsProcess f = gets (f . snd)
 
 modifyProcess :: (Process -> Process) -> PM ()
-modifyProcess f = modify f
+modifyProcess f = modify (\(ctx,p) -> (ctx, f p))
+
+getErlangContextMVar :: PM (MVar ErlangContext)
+getErlangContextMVar = gets fst
 
 runBif :: AtomNo -> AtomNo -> Arity -> PM ()
 runBif emod fun arity =
@@ -135,6 +171,7 @@ bifs = [ ((AT.am_erlang, AT.am_now, Arity 0), erlangNow0)
        , ((AT.am_erlang, AT.am_exit, Arity 1), erlangExit1)
        , ((AT.am_erlang, AT.am_error, Arity 1), erlangError1)
        , ((AT.am_erlang, AT.am_get_stacktrace, Arity 0), erlangGetStacktrace0)
+       , ((AT.am_erlang, AT.am_spawn, Arity 3), erlangSpawn3)
        ]
 
 erlangNow0 :: PM ()
@@ -162,6 +199,19 @@ erlangError1 = do
   t <- readSource (Source (OperandXReg 0))
   fault t (ExcError JustError) --TODO: justerror?
   return ()
+
+erlangSpawn3 :: PM ()
+erlangSpawn3 = do
+  liftIO $ putStrLn "executing erlang:spawn/3"
+  ctx <- getErlangContextMVar
+  emod_ <- readSource (Source (OperandXReg 0))
+  fun_ <- readSource (Source (OperandXReg 1))
+  args <- readSource (Source (OperandXReg 2))
+  case (emod_, fun_) of
+    (EAtom emod, EAtom fun) | isList args -> do
+      liftIO $ spawn3 ctx emod fun args
+      continue
+      return ()
 
 whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
 whenJust Nothing _ = return ()
