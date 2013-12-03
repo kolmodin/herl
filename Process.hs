@@ -89,7 +89,7 @@ runProcess ctx p0 = do
   (steps, (_ctx, p)) <- runStateT stepper (ctx, p0)
   let val = head $ [ v | Left v <- steps ]
   let rendered = renderETerm (pAtomTable p) val
-  liftIO $ putStrLn rendered
+  liftIO $ putStrLn ("Process ended, x0: " ++ rendered)
   where
     stepper = do
         p <- getProcess
@@ -211,7 +211,6 @@ erlangSpawn3 = do
   case (emod_, fun_) of
     (EAtom emod, EAtom fun) | isList args -> do
       liftIO $ spawn3 ctx emod fun args
-      continue
       return ()
 
 ioFormat1 :: PM ()
@@ -357,14 +356,14 @@ gotoModIp modName ip = do
             Nothing -> error $ "no such module; " ++ show modName
   modifyProcess (\p -> p { pEModule = emod, pIp = ip })
 
-gotoModFunArity :: AtomNo -> AtomNo -> Arity -> PM ()
+gotoModFunArity :: AtomNo -> AtomNo -> Arity -> PM (Maybe ETerm)
 gotoModFunArity mod fun ar = do
   erl <- lookupModFunArity mod fun ar
   case erl of
-    Just (emod, ip) -> gotoModIp (emodModNameAtom emod) ip
+    Just (emod, ip) -> gotoModIp (emodModNameAtom emod) ip >> return Nothing
     Nothing -> do -- can be a bif
       case lookup (mod, fun, ar) bifs of
-        Just func -> func
+        Just func -> func >> handleOp KReturn
         Nothing -> do -- TODO: module:fun/ar not found! create erlang error.
           at <- getsProcess pAtomTable
           error $ showString "function " . showMFA at mod fun ar . showString " not found" $ []
@@ -479,11 +478,9 @@ handleOp op0 = do
           returnIp = pIp p + 1
       updateStack (sameModule returnIp:)
       gotoModFunArity modName funName funArity
-      ret
     CallExtOnly _arity ix -> do
       let (modName, funName, funArity) = (emodImports (pEModule p)) V.! (fromIntegral ix)
       gotoModFunArity modName funName funArity
-      ret
     AllocateZero noYregs _ -> do
       modifyProcess (\p -> p { pYreg = replicate (fromIntegral noYregs) (EInteger 0) ++ (pYreg p) })
       continue
