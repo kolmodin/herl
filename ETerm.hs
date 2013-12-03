@@ -35,6 +35,7 @@ isEtermEq = (==)
 isList :: ETerm -> Bool
 isList (EList _ _) = True
 isList ENil = True
+isList (EString _) = True
 isList _ = False
 
 toErlangList :: [ETerm] -> ETerm
@@ -44,6 +45,7 @@ toErlangList (x:xs) = EList x (toErlangList xs)
 fromErlangList :: ETerm -> [ETerm]
 fromErlangList (EList hd tl) = hd : fromErlangList tl
 fromErlangList ENil = []
+fromErlangList (EString bs) = map (EInteger . fromIntegral ) (B.unpack bs)
 
 isAtom :: ETerm -> Bool
 isAtom (EAtom _) = True
