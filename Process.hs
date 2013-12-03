@@ -172,6 +172,7 @@ bifs = [ ((AT.am_erlang, AT.am_now, Arity 0), erlangNow0)
        , ((AT.am_erlang, AT.am_error, Arity 1), erlangError1)
        , ((AT.am_erlang, AT.am_get_stacktrace, Arity 0), erlangGetStacktrace0)
        , ((AT.am_erlang, AT.am_spawn, Arity 3), erlangSpawn3)
+       , ((AT.am_io, AT.am_format, Arity 1), ioFormat1)
        ]
 
 erlangNow0 :: PM ()
@@ -212,6 +213,18 @@ erlangSpawn3 = do
       liftIO $ spawn3 ctx emod fun args
       continue
       return ()
+
+ioFormat1 :: PM ()
+ioFormat1 = do
+  str <- readSource (Source (OperandXReg 0))
+  case isList str of
+    -- TODO: this is wrong and lame
+    True -> liftIO $ putStr ("io:format/1 says: " ++ fixup [ Char.chr (fromIntegral c) | EInteger c <- fromErlangList str ])
+    False -> error "io:format/1 says: not a string/list"
+  where
+    fixup ('~':'n':xs) = '\n' : fixup xs
+    fixup (x:xs) = x : fixup xs
+    fixup [] = []
 
 whenJust :: Monad m => Maybe a -> (a -> m ()) -> m ()
 whenJust Nothing _ = return ()
