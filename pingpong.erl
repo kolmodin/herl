@@ -1,6 +1,6 @@
 -module(pingpong).
 
--export([start/0, ping/2, pong/0]).
+-export([start/0, ping/2, pong/0, foo/0, foo_started/0]).
 
 ping(0, Pong_PID) ->
   Pong_PID ! finished,
@@ -26,3 +26,9 @@ pong() ->
 start() ->
   Pong_PID = spawn(pingpong, pong, []),
   spawn(pingpong, ping, [3, Pong_PID]).
+
+foo_started() ->
+  io:format("foo started~n").
+
+foo() ->
+  spawn(pingpong, foo_started, []).
