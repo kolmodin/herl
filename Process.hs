@@ -8,7 +8,6 @@ module Process where
 
 -- hp
 import           Control.Concurrent
-import           Control.Concurrent.MVar
 import           Control.Monad.State.Strict
 import qualified Data.ByteString            as B
 import qualified Data.Char                  as Char
@@ -70,7 +69,6 @@ runBeam files mod fun args = do
 
 makeProcess :: [EModule] -> AtomTable -> AtomNo -> AtomNo -> [ETerm] -> IO Process
 makeProcess emods at emodAN funAtomName args = do
-  --print $ (map emodName emods, "makeProcess", emodAN, funAtomName, args)
   let argsArity = fromIntegral (length args)
       (emod, ip) = case [ (emod', ip) | emod' <- emods
                                       , emodModNameAtom emod' == emodAN
@@ -138,7 +136,7 @@ spawn3 ec_mvar emod_atom fun_atom args = modifyMVar_ ec_mvar $ \ec -> do
   (emod, at, emods) <- case lookup emod_atom (ctx_mods ec) of
     Just emod -> return (emod, ctx_atomtable ec, ctx_mods ec)
     Nothing -> do
-      beam <- readBeamFile "oh-noes-.beam"
+      beam <- readBeamFile "oh-noes-not-implemented.beam"
       let (emod, at, beam') = beamToModule beam (ctx_atomtable ec)
       return (emod, at, (emod_atom, emod) : ctx_mods ec)
   proc <- makeProcess (map snd emods) at emod_atom fun_atom (fromErlangList args)
