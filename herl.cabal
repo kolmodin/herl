@@ -9,7 +9,7 @@ license:             Apache-2.0
 license-file:        LICENSE
 author:              Lennart Kolmodin
 maintainer:          kolmodin@gmail.com
-copyright:           Google Inc.
+copyright:           Lennart Kolmodin 2013-2014
 category:            System
 build-type:          Simple
 -- extra-source-files:  
