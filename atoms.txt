@@ -1,3 +1,8 @@
+# List of atoms used in erlang.
+# One or two words, separated with a space.
+# If one word, it's the name of the atom in erlang,
+# and in herl the function will be called am_<word>.
+# If two words, the first is the name in herl, second is the atom in erlang.
 exit
 EXIT
 throw
