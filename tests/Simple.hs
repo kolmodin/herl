@@ -22,6 +22,8 @@ main = do
   runAssert "test_if" [EInteger 5] (EAtom (AtomNo 30))
   runAssert "test_if" [EInteger 1] (EAtom (AtomNo 29))
   runAssert "test_if" [EInteger 3] (EAtom (AtomNo 28))
+  runAssert "simple_fun" [] (EInteger 50)
+  runAssert "test_fun" [] (EInteger 92)
 
 runAssert :: B.ByteString -> [ETerm] -> ETerm -> IO ()
 runAssert fun args expected = do
