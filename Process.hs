@@ -57,7 +57,7 @@ data CatchContext =
     , catchActiveYRegs     :: {-# UNPACK #-} !Int
     } deriving Show
 
-runBeam :: [String] -> B.ByteString -> B.ByteString -> [ETerm] -> IO ()
+runBeam :: [String] -> B.ByteString -> B.ByteString -> [ETerm] -> IO (Maybe ETerm)
 runBeam files mod fun args = do
   beams <- mapM readBeamFile files
   let (at, emods) = foldr (\beam (at,emods) -> let (emod, at', beam') = beamToModule beam at in (at', emod:emods)) (AT.basic,[]) beams
@@ -65,7 +65,10 @@ runBeam files mod fun args = do
       modNameAtom = AT.lookupByName at mod
   p0 <- makeProcess emods at modNameAtom funNameAtom args
   ctx <- newMVar (EC [(emodModNameAtom e, e) | e <- emods] at [p0])
-  runProcess ctx p0
+  p <- runProcess ctx p0
+  case pXreg p of
+    (r0:_) -> return (Just r0)
+    _ -> return Nothing
 
 makeProcess :: [EModule] -> AtomTable -> AtomNo -> AtomNo -> [ETerm] -> IO Process
 makeProcess emods at emodAN funAtomName args = do
@@ -81,13 +84,14 @@ makeProcess emods at emodAN funAtomName args = do
   incomming <- newMVar []
   return $ Process args [] ip emod [] [] at Nothing Nothing incomming [ (emodModNameAtom emod, emod) | emod <- emods ]
 
-runProcess :: MVar ErlangContext -> Process -> IO ()
+runProcess :: MVar ErlangContext -> Process -> IO Process
 runProcess ctx p0 = do
   --putStrLn $ ppShow $ pAtomTable p0
   (steps, (_ctx, p)) <- runStateT stepper (ctx, p0)
   let val = head $ [ v | Left v <- steps ]
   let rendered = renderETerm (pAtomTable p) val
-  liftIO $ putStrLn ("Process ended, x0: " ++ rendered)
+  -- liftIO $ putStrLn ("Process ended, x0: " ++ rendered)
+  return p
   where
     stepper = do
         p <- getProcess
@@ -140,7 +144,8 @@ spawn3 ec_mvar emod_atom fun_atom args = modifyMVar_ ec_mvar $ \ec -> do
       let (emod, at, beam') = beamToModule beam (ctx_atomtable ec)
       return (emod, at, (emod_atom, emod) : ctx_mods ec)
   proc <- makeProcess (map snd emods) at emod_atom fun_atom (fromErlangList args)
-  forkIO (runProcess ec_mvar proc)
+  forkIO (runProcess ec_mvar proc >> return ())
+  --liftIO $ threadDelay 2000000
   return ec { ctx_runningProcessess = proc : ctx_runningProcessess ec
             , ctx_mods = emods
             , ctx_atomtable = at }
@@ -432,6 +437,7 @@ handleOp op0 = do
   p <- getProcess
   let thisModuleName = emodModNameAtom (pEModule p)
       sameModule ip = StackFrame thisModuleName ip
+  -- liftIO $ print op0
   case op0 of
     Label _ -> continue
     Line _ -> continue
